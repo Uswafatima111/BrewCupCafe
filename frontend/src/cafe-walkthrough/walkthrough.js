@@ -202,6 +202,8 @@ export function mountCafeWalkthrough(containerElement) {
   const rayDirection = new THREE.Vector3();
   const tourPoints = [];
   const mergedVisuals = [];
+  const runtimeVisuals = [];
+  const runtimeMaterials = [];
   let loaded = false;
   let disposed = false;
   let isTouring = false;
@@ -227,6 +229,7 @@ export function mountCafeWalkthrough(containerElement) {
     raycaster.far = Math.max(1, fromY - bounds.min.y + 1);
     const hits = raycaster.intersectObjects(meshes, false);
     const hit = hits.find((entry) => {
+      if (entry.object.userData.walkable === false) return false;
       const normal = entry.face?.normal?.clone();
       if (!normal) return false;
       normal.transformDirection(entry.object.matrixWorld);
@@ -263,6 +266,93 @@ export function mountCafeWalkthrough(containerElement) {
       const hit = raycaster.intersectObjects(meshes, false)[0];
       return Boolean(hit && hit.distance < distance + PLAYER_RADIUS);
     });
+  }
+
+  function addMercedes(roadY) {
+    const car = new THREE.Group();
+    car.name = 'Walkthrough_Mercedes_Sedan';
+    car.position.set(7.1, roadY, 7.2);
+
+    const paint = new THREE.MeshStandardMaterial({ color: 0x87949b, metalness: 0.82, roughness: 0.24 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x17252c, metalness: 0.35, roughness: 0.16 });
+    const rubber = new THREE.MeshStandardMaterial({ color: 0x151719, roughness: 0.88 });
+    const alloy = new THREE.MeshStandardMaterial({ color: 0xb9c0c2, metalness: 0.9, roughness: 0.2 });
+    const grille = new THREE.MeshStandardMaterial({ color: 0x101416, metalness: 0.45, roughness: 0.3 });
+    const lamp = new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0x57452b, roughness: 0.2 });
+    const tailLamp = new THREE.MeshStandardMaterial({ color: 0x8c1715, emissive: 0x390706, roughness: 0.3 });
+    runtimeMaterials.push(paint, glass, rubber, alloy, grille, lamp, tailLamp);
+
+    const addPart = (geometry, material, position, castShadow = true) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(...position);
+      mesh.castShadow = castShadow;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = true;
+      car.add(mesh);
+      return mesh;
+    };
+    const extrudedProfile = (points, depth, material, zOffset) => {
+      const shape = new THREE.Shape();
+      shape.moveTo(points[0][0], points[0][1]);
+      points.slice(1).forEach(([x, y]) => shape.lineTo(x, y));
+      shape.closePath();
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelSegments: 2, bevelSize: 0.035, bevelThickness: 0.035 });
+      geometry.translate(0, 0, zOffset);
+      addPart(geometry, material, [0, 0, 0]);
+    };
+
+    extrudedProfile([[-2.18, 0.38], [-2.1, 0.79], [-1.76, 0.93], [1.55, 0.93], [2.1, 0.75], [2.17, 0.4]], 1.72, paint, -0.86);
+    extrudedProfile([[-1.28, 0.9], [-0.79, 1.52], [0.71, 1.52], [1.34, 0.9]], 1.36, paint, -0.68);
+    extrudedProfile([[-1.12, 0.99], [-0.68, 1.42], [-0.04, 1.42], [-0.04, 1.0]], 1.385, glass, -0.6925);
+    extrudedProfile([[0.05, 1.0], [0.05, 1.42], [0.62, 1.42], [1.12, 0.99]], 1.385, glass, -0.6925);
+
+    for (const x of [-1.35, 1.35]) {
+      const tire = addPart(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 24), rubber, [x, 0.35, -0.89]);
+      tire.rotation.x = Math.PI / 2;
+      const farTire = tire.clone();
+      farTire.position.z = 0.89;
+      car.add(farTire);
+      for (const z of [-1, 1]) {
+        const hub = addPart(new THREE.CylinderGeometry(0.2, 0.2, 0.235, 16), alloy, [x, 0.35, z * 0.89], false);
+        hub.rotation.x = Math.PI / 2;
+      }
+    }
+
+    addPart(new THREE.BoxGeometry(0.1, 0.34, 0.9), grille, [2.12, 0.68, 0]);
+    for (const z of [-0.59, 0.59]) {
+      addPart(new THREE.BoxGeometry(0.09, 0.2, 0.38), lamp, [2.13, 0.78, z]);
+      addPart(new THREE.BoxGeometry(0.08, 0.17, 0.32), tailLamp, [-2.12, 0.76, z]);
+    }
+    const emblemRing = addPart(new THREE.TorusGeometry(0.13, 0.014, 8, 24), alloy, [2.19, 0.76, 0]);
+    emblemRing.rotation.y = Math.PI / 2;
+    const starCenter = new THREE.Vector3(2.205, 0.76, 0);
+    const starPoints = [
+      new THREE.Vector3(0, 0.105, 0), new THREE.Vector3(0, -0.052, 0.091),
+      new THREE.Vector3(0, -0.052, -0.091),
+    ];
+    for (const end of starPoints) {
+      const from = starCenter;
+      const to = new THREE.Vector3(starCenter.x, starCenter.y + end.y, end.z);
+      const direction = to.clone().sub(from);
+      const spoke = addPart(new THREE.CylinderGeometry(0.009, 0.009, direction.length(), 6), alloy,
+        from.clone().add(to).multiplyScalar(0.5).toArray(), false);
+      spoke.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+    }
+
+    const collider = new THREE.Mesh(
+      new THREE.BoxGeometry(4.5, 1.58, 1.95),
+      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    collider.name = 'Walkthrough_Mercedes_Collider';
+    collider.position.set(0, 0.79, 0);
+    collider.userData.walkable = false;
+    collider.frustumCulled = true;
+    collider.geometry.computeBoundsTree({ targetLeafSize: 8 });
+    car.add(collider);
+    runtimeMaterials.push(collider.material);
+    car.children.filter((part) => part !== collider).forEach((part) => runtimeVisuals.push(part));
+    scene.add(car);
+    meshes.push(collider);
   }
 
   function mergeStaticMeshes(model) {
@@ -705,11 +795,14 @@ export function mountCafeWalkthrough(containerElement) {
     const terrain = model.getObjectByName('Ground_Grass');
     const terrainBounds = terrain ? new THREE.Box3().setFromObject(terrain) : bounds;
     const groundY = terrain ? terrainBounds.min.y - 0.015 : bounds.min.y - 0.05;
+    const road = model.getObjectByName('Road');
+    const roadBounds = road ? new THREE.Box3().setFromObject(road) : bounds;
     model.traverse((object) => {
       if (object.isLight) object.intensity *= 0.003;
     });
     mergeStaticMeshes(model);
     addExtendedGround(groundY);
+    addMercedes(roadBounds.max.y);
     const safetySize = safetyBounds.getSize(new THREE.Vector3());
     loadingNote.textContent = `Free roam ${safetySize.x.toFixed(0)} × ${safetySize.z.toFixed(0)} m · café scene ${size.x.toFixed(0)} × ${size.y.toFixed(1)} × ${size.z.toFixed(0)} m`;
     camera.far = Math.max(1000, size.length() * 3);
@@ -792,6 +885,8 @@ export function mountCafeWalkthrough(containerElement) {
       if (object.geometry.boundsTree) object.geometry.disposeBoundsTree();
       object.geometry.dispose();
     }
+    runtimeVisuals.forEach((object) => object.geometry.dispose());
+    runtimeMaterials.forEach((material) => material.dispose());
     environmentTexture.dispose();
     sky.material.dispose();
     renderer.dispose();
