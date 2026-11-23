@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
-import { lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import SceneErrorBoundary from "./components/SceneErrorBoundary";
+import Modal from "./components/Modal";
+import MenuPanel from "./components/MenuPanel";
+import CartPanel from "./components/CartPanel";
 const CafeScene = lazy(() => import("./components/CafeScene"));
 
 function LoadingScreen({ done }) {
@@ -16,35 +18,52 @@ function LoadingScreen({ done }) {
 
 export default function App() {
   const [loaded, setLoaded] = useState(false);
-  const [overlay, setOverlay] = useState(null); // null | "chat" | "menu"
+  const [overlay, setOverlay] = useState(null); // null | "menu" | "cart" | "checkout" | "chat"
+  const [cart, setCart] = useState([]); // [{id,name,price,quantity}]
 
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 1500);
     return () => clearTimeout(t);
   }, []);
 
-  // Will be passed to <CafeScene onInteract={handleInteract} /> later
   const handleInteract = (name) => {
     if (name === "INTERACT_Telephone") setOverlay("chat");
     else setOverlay("menu"); // Register or MenuDisplay
   };
 
+  const addToCart = (item) =>
+    setCart((c) => {
+      const found = c.find((i) => i.id === item.id);
+      if (found) return c.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+      return [...c, { id: item.id, name: item.name, price: item.price, quantity: 1 }];
+    });
+
+  const setQty = (id, quantity) =>
+    setCart((c) => (quantity <= 0 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, quantity } : i))));
+
+  const close = () => setOverlay(null);
+
   return (
-  <>
-    <LoadingScreen done={loaded} />
-    <SceneErrorBoundary>
-      <Suspense fallback={null}>
-        <CafeScene onInteract={handleInteract} />
-      </Suspense>
-    </SceneErrorBoundary>
-    {overlay && (
-      <div className="fixed inset-0 z-40 grid place-items-center bg-black/60" onClick={() => setOverlay(null)}>
-        <div className="rounded-xl bg-[#03170e] p-6" onClick={(e) => e.stopPropagation()}>
-          <p>{overlay} panel goes here</p>
-          <button className="mt-4 underline" onClick={() => setOverlay(null)}>Close</button>
-        </div>
-      </div>
-    )}
-  </>
-);
+    <>
+      <LoadingScreen done={loaded} />
+      <SceneErrorBoundary>
+        <Suspense fallback={null}>
+          <CafeScene onInteract={handleInteract} />
+        </Suspense>
+      </SceneErrorBoundary>
+
+      {overlay === "menu" && (
+        <MenuPanel cart={cart} onAdd={addToCart} onOpenCart={() => setOverlay("cart")} onClose={close} />
+      )}
+      {overlay === "cart" && (
+        <CartPanel cart={cart} onSetQty={setQty} onBack={() => setOverlay("menu")} onCheckout={() => setOverlay("checkout")} onClose={close} />
+      )}
+      {overlay === "checkout" && (
+        <Modal title="CHECKOUT" onClose={close}><p>Checkout form goes here.</p></Modal>
+      )}
+      {overlay === "chat" && (
+        <Modal title="CALL THE CAFE" onClose={close}><p>Chat panel goes here.</p></Modal>
+      )}
+    </>
+  );
 }
