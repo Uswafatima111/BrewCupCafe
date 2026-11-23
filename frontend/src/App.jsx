@@ -1,7 +1,6 @@
 
 import { useEffect, useState, lazy, Suspense } from "react";
 import SceneErrorBoundary from "./components/SceneErrorBoundary";
-import Modal from "./components/Modal";
 import MenuPanel from "./components/MenuPanel";
 import CartPanel from "./components/CartPanel";
 import CheckoutPanel from "./components/CheckoutPanel";
@@ -23,6 +22,7 @@ function LoadingScreen({ done }) {
           className="mx-auto mb-4 h-24 rounded-full"
           onError={(e) => (e.currentTarget.style.display = "none")}
         />
+
         <p className="tracking-[0.4em]">BREW CUP CAFE</p>
       </div>
     </div>
@@ -47,6 +47,7 @@ export default function App() {
     }
   };
 
+  // Add item to cart
   const addToCart = (item) =>
     setCart((c) => {
       const found = c.find((i) => i.id === item.id);
@@ -70,6 +71,7 @@ export default function App() {
       ];
     });
 
+  // Update cart quantity
   const setQty = (id, quantity) =>
     setCart((c) =>
       quantity <= 0
@@ -79,18 +81,53 @@ export default function App() {
           )
     );
 
+  // Close active overlay
   const close = () => setOverlay(null);
+
+  // Total number of items in cart
+  const cartCount = cart.reduce(
+    (n, item) => n + item.quantity,
+    0
+  );
 
   return (
     <>
+      {/* Loading Screen */}
       <LoadingScreen done={loaded} />
 
+      {/* 3D Cafe Scene */}
       <SceneErrorBoundary>
         <Suspense fallback={null}>
           <CafeScene onInteract={handleInteract} />
         </Suspense>
       </SceneErrorBoundary>
 
+      {/* Floating Navigation Buttons */}
+      <div className="fixed right-4 top-4 z-30 flex gap-2">
+        {[
+          ["Menu", () => setOverlay("menu")],
+          ["☎ Call", () => setOverlay("chat")],
+          [
+            `Cart (${cartCount})`,
+            () => setOverlay("cart"),
+          ],
+        ].map(([label, onClick]) => (
+          <button
+            key={label}
+            onClick={onClick}
+            className="rounded-full border border-[#d9a441] bg-[#03170e]/80 px-4 py-1 text-sm text-[#f3e3b8] backdrop-blur hover:bg-[#d9a441] hover:text-[#03170e]"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Photo Credit */}
+      <p className="fixed bottom-2 left-3 z-30 text-xs text-[#f3e3b8]/60">
+        Photos: Brew Cup Cafe, Bhatkal
+      </p>
+
+      {/* Menu Panel */}
       {overlay === "menu" && (
         <MenuPanel
           cart={cart}
@@ -100,6 +137,7 @@ export default function App() {
         />
       )}
 
+      {/* Cart Panel */}
       {overlay === "cart" && (
         <CartPanel
           cart={cart}
@@ -110,6 +148,7 @@ export default function App() {
         />
       )}
 
+      {/* Checkout Panel */}
       {overlay === "checkout" && (
         <CheckoutPanel
           cart={cart}
@@ -122,6 +161,7 @@ export default function App() {
         />
       )}
 
+      {/* Chat Panel */}
       {overlay === "chat" && (
         <ChatPanel onClose={close} />
       )}
