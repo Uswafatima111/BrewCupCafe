@@ -15,6 +15,7 @@ const RUN_SPEED = 4.0;
 const ACCELERATION = 9;
 const DAMPING = 7;
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
+const WALKABLE_BOUNDS_NAME = /^(?:Floor|Mezz_Floor|Step_Upper|Deck_\d+_\d+|Pool(?:[A-Z])?_(?:Coping|Floor|Water|Wall))$/;
 
 const styleText = `
   .cafe-walkthrough { position:relative; width:100%; height:100%; min-height:100svh; overflow:hidden; color:#f7f0e7; background:#17120f; font-family:"Avenir Next", "Segoe UI", sans-serif; }
@@ -49,13 +50,14 @@ const styleText = `
 
 function readTourPath(data) {
   if (!Array.isArray(data?.keys) || data.keys.length < 5) return [];
-  const keys = data.keys.filter((key) => Array.isArray(key.position) && key.position.length === 3 && key.position.every(Number.isFinite)
+  const keys = data.keys.map((key, pathIndex) => ({ ...key, pathIndex })).filter((key) => Array.isArray(key.position) && key.position.length === 3 && key.position.every(Number.isFinite)
     && Array.isArray(key.target) && key.target.length === 3 && key.target.every(Number.isFinite));
   if (keys.length < 5) return [];
   const selections = [
-    ['Entrance', 1], ['Counter', 2], ['Mezzanine', 5], ['Mural seating', 6], ['Pool', keys.length - 1],
+    ['Entrance', 2], ['Counter', 3], ['Mezzanine', 4], ['Mural seating', 5], ['Pool', data.keys.length - 1],
   ];
-  return selections.map(([label, index]) => ({ label, ...keys[Math.min(index, keys.length - 1)] }));
+  if (selections.some(([, pathIndex]) => !keys.some((key) => key.pathIndex === pathIndex))) return [];
+  return selections.map(([label, pathIndex]) => ({ label, ...keys.find((key) => key.pathIndex === pathIndex) }));
 }
 
 async function fetchTourPath() {
@@ -132,6 +134,7 @@ export function mountCafeWalkthrough(containerElement) {
   const desired = new THREE.Vector3();
   const player = new THREE.Vector3();
   const bounds = new THREE.Box3();
+  const walkBounds = new THREE.Box3();
   const keys = new Set();
   const lookTarget = new THREE.Vector3();
   const rayDirection = new THREE.Vector3();
@@ -297,12 +300,13 @@ export function mountCafeWalkthrough(containerElement) {
       const next = candidate.clone().add(axis);
       const nextFloor = floorAt(next.x, next.z, candidate.y + 1.35);
       if (nextFloor === null || nextFloor < candidate.y - 0.38 || nextFloor > candidate.y + 0.45) continue;
-      const lowerBlocked = wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.22);
+      const steppingUp = nextFloor > candidate.y + 0.05;
+      const lowerBlocked = !steppingUp && wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.08);
       const upperBlocked = wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.95);
       if (lowerBlocked || upperBlocked) continue;
       if (!hasCeilingClearance(next.x, next.z, nextFloor)) continue;
-      if (next.x < bounds.min.x + PLAYER_RADIUS || next.x > bounds.max.x - PLAYER_RADIUS
-        || next.z < bounds.min.z + PLAYER_RADIUS || next.z > bounds.max.z - PLAYER_RADIUS) continue;
+      if (next.x < walkBounds.min.x + PLAYER_RADIUS || next.x > walkBounds.max.x - PLAYER_RADIUS
+        || next.z < walkBounds.min.z + PLAYER_RADIUS || next.z > walkBounds.max.z - PLAYER_RADIUS) continue;
       candidate.x = next.x;
       candidate.z = next.z;
       candidate.y = nextFloor;
@@ -440,7 +444,13 @@ export function mountCafeWalkthrough(containerElement) {
     });
     bounds.setFromObject(model);
     const size = bounds.getSize(new THREE.Vector3());
-    loadingNote.textContent = `Interior bounds ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)} m`;
+    walkBounds.makeEmpty();
+    model.traverse((object) => {
+      if (object.isMesh && WALKABLE_BOUNDS_NAME.test(object.name)) walkBounds.expandByObject(object);
+    });
+    if (walkBounds.isEmpty()) walkBounds.copy(bounds);
+    const walkSize = walkBounds.getSize(new THREE.Vector3());
+    loadingNote.textContent = `Walkable area ${walkSize.x.toFixed(1)} × ${walkSize.z.toFixed(1)} m · full export ${size.x.toFixed(0)} × ${size.y.toFixed(0)} × ${size.z.toFixed(0)} m`;
     camera.far = Math.max(160, size.length() * 2);
     camera.updateProjectionMatrix();
     const path = await tourPromise;
@@ -459,7 +469,8 @@ export function mountCafeWalkthrough(containerElement) {
       tourButton.hidden = true;
       spots.hidden = true;
     }
-    const startKey = path.find((entry) => bounds.containsPoint(new THREE.Vector3(...entry.position)));
+    const startKey = path.find((entry) => entry.pathIndex === 3 && walkBounds.containsPoint(new THREE.Vector3(...entry.position)))
+      ?? path.find((entry) => entry.label === 'Entrance' && walkBounds.containsPoint(new THREE.Vector3(...entry.position)));
     const start = startKey
       ? new THREE.Vector3(...startKey.position)
       : new THREE.Vector3(bounds.min.x + size.x / 2, bounds.min.y + EYE_HEIGHT, bounds.max.z - Math.min(1.5, size.z * 0.08));
