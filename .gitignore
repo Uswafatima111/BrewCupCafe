@@ -7,3 +7,5 @@ __pycache__/
 .DS_Store
 *.blend1
 output/tmp/
+frontend/.vite/
+npm-debug.log*

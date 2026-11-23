@@ -1,0 +1,66 @@
+[
+  {
+    "id": "nutella_bomboloni",
+    "name": "Nutella Bomboloni",
+    "price": 130,
+    "currency": "INR",
+    "category": "dessert",
+    "model": "/models/nutella_bomboloni.glb"
+  },
+  {
+    "id": "london_viral_cake",
+    "name": "London Viral Cake",
+    "price": 350,
+    "currency": "INR",
+    "category": "cake",
+    "model": "/models/london_viral_cake.glb"
+  },
+  {
+    "id": "almond_praline_strawberry_dark_chocolate_cake",
+    "name": "Almond Praline & Strawberry Dark Chocolate Cake",
+    "price": 400,
+    "currency": "INR",
+    "category": "cake",
+    "model": "/models/almond_praline_strawberry_dark_chocolate_cake.glb"
+  },
+  {
+    "id": "spanish_latte",
+    "name": "Spanish Latte",
+    "price": 199,
+    "currency": "INR",
+    "category": "coffee",
+    "model": "/models/spanish_latte.glb"
+  },
+  {
+    "id": "iced_french_vanilla_latte",
+    "name": "Iced French Vanilla Latte",
+    "price": 179,
+    "currency": "INR",
+    "category": "coffee",
+    "model": "/models/iced_french_vanilla_latte.glb"
+  },
+  {
+    "id": "iced_cafe_mocha",
+    "name": "Iced Cafe Mocha",
+    "price": 179,
+    "currency": "INR",
+    "category": "coffee",
+    "model": "/models/iced_cafe_mocha.glb"
+  },
+  {
+    "id": "chicken_overload_pizza",
+    "name": "Chicken Overload Pizza",
+    "price": 400,
+    "currency": "INR",
+    "category": "pizza",
+    "model": "/models/chicken_overload_pizza.glb"
+  },
+  {
+    "id": "alfredo_pasta",
+    "name": "Alfredo Pasta",
+    "price": 300,
+    "currency": "INR",
+    "category": "pasta",
+    "model": "/models/alfredo_pasta.glb"
+  }
+]
