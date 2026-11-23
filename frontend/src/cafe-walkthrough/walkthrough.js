@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -12,10 +14,12 @@ const EYE_HEIGHT = 1.6;
 const PLAYER_RADIUS = 0.24;
 const WALK_SPEED = 2.2;
 const RUN_SPEED = 4.0;
+const FLY_SPEED = 5.0;
+const MAX_STEP_HEIGHT = 0.4;
 const ACCELERATION = 9;
 const DAMPING = 7;
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
-const WALKABLE_BOUNDS_NAME = /^(?:Floor|Mezz_Floor|Step_Upper|Deck_\d+_\d+|Pool(?:[A-Z])?_(?:Coping|Floor|Water|Wall))$/;
+const SHADOW_CASTER_NAME = /^(?:Roof_|Wall_|Facade|Floor$|Mezz_|Step_|Door_|Column|Beam|Counter|Pillar|Window)/;
 
 const styleText = `
   .cafe-walkthrough { position:relative; width:100%; height:100%; min-height:100svh; overflow:hidden; color:#f7f0e7; background:#17120f; font-family:"Avenir Next", "Segoe UI", sans-serif; }
@@ -43,30 +47,39 @@ const styleText = `
   .cafe-walkthrough__error { position:absolute; inset:auto 20px 20px; padding:14px 16px; border-radius:12px; color:#ffddd2; background:#601f17ed; font-size:13px; }
   .cafe-walkthrough__joystick { position:absolute; left:24px; bottom:24px; width:116px; height:116px; border:1px solid #ffffff46; border-radius:50%; background:#211a1685; touch-action:none; pointer-events:auto; display:none; }
   .cafe-walkthrough__stick { position:absolute; left:50%; top:50%; width:48px; height:48px; border-radius:50%; background:#d4a775dd; transform:translate(-50%,-50%); box-shadow:0 4px 16px #0006; }
+  .cafe-walkthrough__flight-controls { position:absolute; right:20px; bottom:24px; display:flex; gap:8px; pointer-events:auto; }
+  .cafe-walkthrough__flight-controls[hidden] { display:none; }
   @media (pointer:coarse) { .cafe-walkthrough__joystick { display:block; } .cafe-walkthrough__hint { bottom:154px; white-space:normal; width:max-content; max-width:calc(100% - 36px); } }
-  @media (max-width:620px) { .cafe-walkthrough__top { top:12px; left:12px; right:12px; align-items:flex-start; } .cafe-walkthrough__brand { padding:9px 11px; } .cafe-walkthrough__brand strong { font-size:15px; } .cafe-walkthrough__actions { max-width:68%; gap:6px; } .cafe-walkthrough button, .cafe-walkthrough select { min-height:38px; padding:0 10px; font-size:12px; } .cafe-walkthrough__joystick { left:15px; bottom:17px; width:104px; height:104px; } }
+  @media (max-width:760px) { .cafe-walkthrough__top { top:12px; left:12px; right:12px; align-items:flex-start; } .cafe-walkthrough__brand { padding:9px 11px; } .cafe-walkthrough__brand strong { font-size:15px; } .cafe-walkthrough__actions { max-width:72%; gap:6px; } .cafe-walkthrough button, .cafe-walkthrough select { min-height:38px; padding:0 10px; font-size:12px; } .cafe-walkthrough__joystick { left:15px; bottom:17px; width:104px; height:104px; } .cafe-walkthrough__flight-controls { right:15px; bottom:18px; flex-direction:column; } }
   @media (prefers-reduced-motion: reduce) { .cafe-walkthrough *, .cafe-walkthrough *::before, .cafe-walkthrough *::after { transition-duration:.01ms !important; scroll-behavior:auto !important; } }
 `;
 
 function readTourPath(data) {
-  if (!Array.isArray(data?.keys) || data.keys.length < 5) return [];
+  if (!Array.isArray(data?.keys) || data.keys.length < 5) return { stops: [], outsideStart: null, entranceOutside: null, entranceInside: null };
   const keys = data.keys.map((key, pathIndex) => ({ ...key, pathIndex })).filter((key) => Array.isArray(key.position) && key.position.length === 3 && key.position.every(Number.isFinite)
     && Array.isArray(key.target) && key.target.length === 3 && key.target.every(Number.isFinite));
-  if (keys.length < 5) return [];
+  if (keys.length < 5) return { stops: [], outsideStart: null, entranceOutside: null, entranceInside: null };
   const selections = [
     ['Entrance', 2], ['Counter', 3], ['Mezzanine', 4], ['Mural seating', 5], ['Pool', data.keys.length - 1],
   ];
-  if (selections.some(([, pathIndex]) => !keys.some((key) => key.pathIndex === pathIndex))) return [];
-  return selections.map(([label, pathIndex]) => ({ label, ...keys.find((key) => key.pathIndex === pathIndex) }));
+  if (selections.some(([, pathIndex]) => !keys.some((key) => key.pathIndex === pathIndex))) {
+    return { stops: [], outsideStart: null, entranceOutside: null, entranceInside: null };
+  }
+  return {
+    stops: selections.map(([label, pathIndex]) => ({ label, ...keys.find((key) => key.pathIndex === pathIndex) })),
+    outsideStart: keys.find((key) => key.pathIndex === 0) ?? null,
+    entranceOutside: keys.find((key) => key.pathIndex === 2) ?? null,
+    entranceInside: keys.find((key) => key.pathIndex === 3) ?? null,
+  };
 }
 
 async function fetchTourPath() {
   try {
     const response = await fetch(PATH_URL);
-    if (!response.ok) return [];
+    if (!response.ok) return { stops: [], outsideStart: null, entranceOutside: null, entranceInside: null };
     return readTourPath(await response.json());
   } catch {
-    return [];
+    return { stops: [], outsideStart: null, entranceOutside: null, entranceInside: null };
   }
 }
 
@@ -82,11 +95,18 @@ export function mountCafeWalkthrough(containerElement) {
           <select class="cafe-walkthrough__spots" aria-label="Choose a tour stop"><option value="">Explore the café</option></select>
           <button class="cafe-walkthrough__tour" type="button">Take the tour</button>
           <button class="cafe-walkthrough__stop" type="button" hidden>Stop / Explore</button>
+          <button class="cafe-walkthrough__inside" type="button">Go inside</button>
+          <button class="cafe-walkthrough__outside" type="button">Go outside</button>
+          <button class="cafe-walkthrough__fly" type="button" aria-pressed="false">Fly mode</button>
           <button class="cafe-walkthrough__reset" type="button">Reset view</button>
         </div>
       </div>
-      <div class="cafe-walkthrough__hint">W A S D or arrow keys to walk · drag to look · Shift to run</div>
+      <div class="cafe-walkthrough__hint">W A S D or arrows to walk · drag to look · Shift to run · F fly (Space / Ctrl rise or lower)</div>
       <div class="cafe-walkthrough__joystick" aria-label="Walk joystick"><div class="cafe-walkthrough__stick"></div></div>
+      <div class="cafe-walkthrough__flight-controls" hidden>
+        <button class="cafe-walkthrough__rise" type="button">Rise</button>
+        <button class="cafe-walkthrough__lower" type="button">Lower</button>
+      </div>
     </div>
     <div class="cafe-walkthrough__loading" role="status" aria-live="polite"><div class="cafe-walkthrough__loading-inner"><div class="cafe-walkthrough__loading-label">Opening the café…</div><div class="cafe-walkthrough__track"><div class="cafe-walkthrough__bar"></div></div><div class="cafe-walkthrough__loading-note">Preparing the interior</div></div></div>
   `;
@@ -105,11 +125,18 @@ export function mountCafeWalkthrough(containerElement) {
   const spots = root.querySelector('.cafe-walkthrough__spots');
   const tourButton = root.querySelector('.cafe-walkthrough__tour');
   const stopButton = root.querySelector('.cafe-walkthrough__stop');
+  const insideButton = root.querySelector('.cafe-walkthrough__inside');
+  const outsideButton = root.querySelector('.cafe-walkthrough__outside');
+  const flyButton = root.querySelector('.cafe-walkthrough__fly');
   const resetButton = root.querySelector('.cafe-walkthrough__reset');
   const joystick = root.querySelector('.cafe-walkthrough__joystick');
   const stick = root.querySelector('.cafe-walkthrough__stick');
+  const flightControls = root.querySelector('.cafe-walkthrough__flight-controls');
+  const riseButton = root.querySelector('.cafe-walkthrough__rise');
+  const lowerButton = root.querySelector('.cafe-walkthrough__lower');
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#17120f');
+  scene.background = new THREE.Color(0xbfd3dd);
+  scene.fog = new THREE.Fog(0xbfd3dd, 100, 320);
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 160);
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -117,13 +144,48 @@ export function mountCafeWalkthrough(containerElement) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.65;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   canvasHost.append(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0xffead5, 0x38291e, 0.45));
-  const fill = new THREE.DirectionalLight(0xffd5a4, 0.25);
-  fill.position.set(-4, 8, 6);
-  scene.add(fill);
+  scene.add(new THREE.HemisphereLight(0xffead5, 0x38291e, 0.5));
+  const sky = new Sky();
+  sky.scale.setScalar(600);
+  sky.frustumCulled = false;
+  const skyUniforms = sky.material.uniforms;
+  skyUniforms.turbidity.value = 5.5;
+  skyUniforms.rayleigh.value = 2.1;
+  skyUniforms.mieCoefficient.value = 0.004;
+  skyUniforms.mieDirectionalG.value = 0.82;
+  const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(62), THREE.MathUtils.degToRad(0));
+  skyUniforms.sunPosition.value.copy(sunPosition);
+  scene.add(sky);
+
+  const environmentSky = sky.clone();
+  environmentSky.material = sky.material.clone();
+  environmentSky.scale.setScalar(1);
+  const environmentScene = new THREE.Scene();
+  environmentScene.add(environmentSky);
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const environmentTexture = pmremGenerator.fromScene(environmentScene).texture;
+  scene.environment = environmentTexture;
+  scene.environmentIntensity = 0.18;
+  pmremGenerator.dispose();
+  environmentSky.material.dispose();
+
+  const sun = new THREE.DirectionalLight(0xfff0d5, 0.8);
+  sun.position.copy(sunPosition).multiplyScalar(70);
+  sun.target.position.set(0, 0, -4);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -40;
+  sun.shadow.camera.right = 40;
+  sun.shadow.camera.top = 40;
+  sun.shadow.camera.bottom = -40;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 150;
+  sun.shadow.bias = -0.00025;
+  sun.shadow.radius = 3;
+  scene.add(sun, sun.target);
 
   const loader = new GLTFLoader();
   const raycaster = new THREE.Raycaster();
@@ -134,11 +196,12 @@ export function mountCafeWalkthrough(containerElement) {
   const desired = new THREE.Vector3();
   const player = new THREE.Vector3();
   const bounds = new THREE.Box3();
-  const walkBounds = new THREE.Box3();
+  const safetyBounds = new THREE.Box3();
   const keys = new Set();
   const lookTarget = new THREE.Vector3();
   const rayDirection = new THREE.Vector3();
   const tourPoints = [];
+  const mergedVisuals = [];
   let loaded = false;
   let disposed = false;
   let isTouring = false;
@@ -152,6 +215,10 @@ export function mountCafeWalkthrough(containerElement) {
   let joystickValue = { x: 0, y: 0 };
   let floorY = 0;
   let initialPosition = null;
+  let entranceInside = null;
+  let entranceOutside = null;
+  let groundPlane = null;
+  let flyMode = false;
   let frameId = 0;
   let previousFrame = performance.now();
 
@@ -188,6 +255,100 @@ export function mountCafeWalkthrough(containerElement) {
     return raycaster.intersectObjects(meshes, false).length === 0;
   }
 
+  function blockedAbove(position, distance) {
+    const direction = new THREE.Vector3(0, 1, 0);
+    return [0.08, 0.95, 1.55].some((height) => {
+      raycaster.set(new THREE.Vector3(position.x, position.y + height, position.z), direction);
+      raycaster.far = distance + PLAYER_RADIUS;
+      const hit = raycaster.intersectObjects(meshes, false)[0];
+      return Boolean(hit && hit.distance < distance + PLAYER_RADIUS);
+    });
+  }
+
+  function mergeStaticMeshes(model) {
+    const batches = new Map();
+    model.updateMatrixWorld(true);
+    model.traverse((object) => {
+      if (!object.isMesh) return;
+      object.frustumCulled = true;
+      object.castShadow = SHADOW_CASTER_NAME.test(object.name);
+      object.receiveShadow = true;
+
+      const material = object.material;
+      const geometry = object.geometry;
+      if (object.isSkinnedMesh || object.isInstancedMesh || Array.isArray(material) || material.transparent
+        || material.opacity < 1 || geometry.groups.length || Object.keys(geometry.morphAttributes).length) {
+        if (!geometry.boundsTree) geometry.computeBoundsTree({ targetLeafSize: 12 });
+        meshes.push(object);
+        return;
+      }
+      const attributes = Object.entries(geometry.attributes)
+        .map(([name, attribute]) => `${name}:${attribute.itemSize}:${attribute.normalized}:${attribute.array.constructor.name}`)
+        .sort().join('|');
+      const key = `${material.uuid}:${Boolean(geometry.index)}:${attributes}`;
+      const worldGeometry = geometry.clone();
+      worldGeometry.applyMatrix4(object.matrixWorld);
+      const batch = batches.get(key) ?? { material, objects: [], geometries: [] };
+      batch.objects.push(object);
+      batch.geometries.push(worldGeometry);
+      batches.set(key, batch);
+    });
+
+    for (const batch of batches.values()) {
+      let geometry;
+      try {
+        geometry = mergeGeometries(batch.geometries, false);
+      } catch (error) {
+        console.warn('Could not merge a café mesh batch; keeping its source meshes.', error);
+      }
+      if (!geometry) {
+        batch.geometries.forEach((item) => item.dispose());
+        for (const object of batch.objects) {
+          if (!object.geometry.boundsTree) object.geometry.computeBoundsTree({ targetLeafSize: 12 });
+          meshes.push(object);
+        }
+        continue;
+      }
+      geometry.computeBoundingSphere();
+      const visual = new THREE.Mesh(geometry, batch.material);
+      geometry.computeBoundsTree({ targetLeafSize: 12 });
+      visual.frustumCulled = true;
+      visual.castShadow = batch.objects.some((object) => object.castShadow);
+      visual.receiveShadow = true;
+      scene.add(visual);
+      mergedVisuals.push(visual);
+      meshes.push(visual);
+      for (const object of batch.objects) {
+        const worldMatrix = object.matrixWorld.clone();
+        const colliderIndex = meshes.indexOf(object);
+        if (colliderIndex !== -1) meshes.splice(colliderIndex, 1);
+        object.removeFromParent();
+        object.matrix.copy(worldMatrix);
+        object.matrixAutoUpdate = false;
+        object.updateMatrixWorld(true);
+        if (object.geometry.boundsTree) object.geometry.disposeBoundsTree();
+        object.geometry.dispose();
+      }
+      batch.geometries.forEach((item) => item.dispose());
+    }
+  }
+
+  function addExtendedGround(groundY) {
+    const center = safetyBounds.getCenter(new THREE.Vector3());
+    const size = safetyBounds.getSize(new THREE.Vector3());
+    const geometry = new THREE.PlaneGeometry(size.x, size.z);
+    geometry.computeBoundsTree({ targetLeafSize: 12 });
+    const material = new THREE.MeshStandardMaterial({ color: 0x72806d, roughness: 0.96 });
+    groundPlane = new THREE.Mesh(geometry, material);
+    groundPlane.name = 'Walkthrough_Extended_Ground';
+    groundPlane.rotation.x = -Math.PI / 2;
+    groundPlane.position.set(center.x, groundY, center.z);
+    groundPlane.receiveShadow = true;
+    groundPlane.frustumCulled = true;
+    scene.add(groundPlane);
+    meshes.push(groundPlane);
+  }
+
   function setCameraLook() {
     camera.rotation.set(pitch, yaw, 0, 'YXZ');
   }
@@ -214,6 +375,38 @@ export function mountCafeWalkthrough(containerElement) {
     tourStart = null;
     stopButton.hidden = true;
     tourButton.hidden = false;
+  }
+
+  function setFlyMode(enabled) {
+    if (flyMode === enabled) return;
+    flyMode = enabled;
+    flyButton.setAttribute('aria-pressed', String(flyMode));
+    flyButton.textContent = flyMode ? 'Fly mode: on' : 'Fly mode';
+    flightControls.hidden = !flyMode;
+    velocity.set(0, 0, 0);
+    if (!flyMode) {
+      const surface = floorAt(player.x, player.z, player.y + MAX_STEP_HEIGHT + 0.5);
+      if (surface !== null) {
+        player.y = surface;
+        floorY = surface;
+        camera.position.y = surface + EYE_HEIGHT;
+      }
+    }
+  }
+
+  function cameraPointOnSurface(point) {
+    const position = [...point.position];
+    const surface = floorAt(position[0], position[2], position[1] + 2);
+    if (surface !== null) position[1] = surface + EYE_HEIGHT;
+    return { ...point, position };
+  }
+
+  function travelToEntrance(point) {
+    if (!point) return;
+    stopTour();
+    if (flyMode) setFlyMode(false);
+    velocity.set(0, 0, 0);
+    glideTo(cameraPointOnSurface(point), 1.5);
   }
 
   function glideTo(point, duration = 1.5) {
@@ -280,15 +473,18 @@ export function mountCafeWalkthrough(containerElement) {
     const turn = (keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0);
     yaw += turn * delta * 1.7;
     setCameraLook();
-    desired.set(Math.sin(yaw) * forward + Math.cos(yaw) * strafe, 0,
+    const vertical = (keys.has('Space') ? 1 : 0) - (keys.has('ControlLeft') || keys.has('ControlRight') ? 1 : 0);
+    desired.set(Math.sin(yaw) * forward + Math.cos(yaw) * strafe, flyMode ? vertical : 0,
       -Math.cos(yaw) * forward + Math.sin(yaw) * strafe);
     if (desired.lengthSq() > 1) desired.normalize();
-    const speed = keys.has('ShiftLeft') || keys.has('ShiftRight') ? RUN_SPEED : WALK_SPEED;
+    const speed = flyMode ? FLY_SPEED : (keys.has('ShiftLeft') || keys.has('ShiftRight') ? RUN_SPEED : WALK_SPEED);
     desired.multiplyScalar(speed);
     const factor = 1 - Math.exp(-(desired.lengthSq() > 0 ? ACCELERATION : DAMPING) * delta);
     velocity.lerp(desired, factor);
     const displacement = velocity.clone().multiplyScalar(delta);
-    if (displacement.lengthSq() < 1e-7) return;
+    if (displacement.lengthSq() < 1e-7) {
+      return;
+    }
 
     const candidate = player.clone();
     const axes = [new THREE.Vector3(displacement.x, 0, 0), new THREE.Vector3(0, 0, displacement.z)];
@@ -297,18 +493,49 @@ export function mountCafeWalkthrough(containerElement) {
       if (!length) continue;
       const direction = axis.clone().normalize();
       const next = candidate.clone().add(axis);
-      const nextFloor = floorAt(next.x, next.z, candidate.y + 1.35);
-      if (nextFloor === null || nextFloor < candidate.y - 0.38 || nextFloor > candidate.y + 0.45) continue;
-      const steppingUp = nextFloor > candidate.y + 0.05;
-      const lowerBlocked = !steppingUp && wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.08);
-      const upperBlocked = wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.95);
-      if (lowerBlocked || upperBlocked) continue;
-      if (!hasCeilingClearance(next.x, next.z, nextFloor)) continue;
-      if (next.x < walkBounds.min.x + PLAYER_RADIUS || next.x > walkBounds.max.x - PLAYER_RADIUS
-        || next.z < walkBounds.min.z + PLAYER_RADIUS || next.z > walkBounds.max.z - PLAYER_RADIUS) continue;
+      let nextFloor = candidate.y;
+      if (!flyMode) {
+        nextFloor = floorAt(next.x, next.z, candidate.y + MAX_STEP_HEIGHT + 0.5);
+        if (nextFloor === null || nextFloor < candidate.y - MAX_STEP_HEIGHT || nextFloor > candidate.y + MAX_STEP_HEIGHT) {
+          continue;
+        }
+      }
+      const steppingUp = !flyMode && nextFloor > candidate.y + 0.05;
+      const stepProbeDistance = length + PLAYER_RADIUS + MAX_STEP_HEIGHT + 0.05;
+      const stepAheadFloor = flyMode ? null : floorAt(
+        candidate.x + direction.x * stepProbeDistance,
+        candidate.z + direction.z * stepProbeDistance,
+        candidate.y + MAX_STEP_HEIGHT + 0.5,
+      );
+      const smallStepAhead = stepAheadFloor !== null
+        && stepAheadFloor > candidate.y + 0.05
+        && stepAheadFloor <= candidate.y + MAX_STEP_HEIGHT;
+      const lowerBlocked = !steppingUp && !smallStepAhead && wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.08);
+      const bodyBlocked = wallAhead(candidate, direction, length + PLAYER_RADIUS, 0.95);
+      const headBlocked = wallAhead(candidate, direction, length + PLAYER_RADIUS, 1.55);
+      if (lowerBlocked || bodyBlocked || headBlocked) {
+        continue;
+      }
+      if (!flyMode && !hasCeilingClearance(next.x, next.z, nextFloor)) {
+        continue;
+      }
+      if (next.x < safetyBounds.min.x + PLAYER_RADIUS || next.x > safetyBounds.max.x - PLAYER_RADIUS
+        || next.z < safetyBounds.min.z + PLAYER_RADIUS || next.z > safetyBounds.max.z - PLAYER_RADIUS) {
+        continue;
+      }
       candidate.x = next.x;
       candidate.z = next.z;
       candidate.y = nextFloor;
+    }
+    if (flyMode && displacement.y !== 0) {
+      const verticalStep = Math.abs(displacement.y);
+      if (displacement.y > 0 && !blockedAbove(candidate, verticalStep)) {
+        candidate.y = Math.min(candidate.y + displacement.y, safetyBounds.max.y - EYE_HEIGHT);
+      } else if (displacement.y < 0) {
+        const proposedY = Math.max(candidate.y + displacement.y, safetyBounds.min.y);
+        const floor = floorAt(candidate.x, candidate.z, proposedY + MAX_STEP_HEIGHT);
+        candidate.y = floor !== null && floor > proposedY ? floor : proposedY;
+      }
     }
     player.copy(candidate);
     floorY = candidate.y;
@@ -338,7 +565,13 @@ export function mountCafeWalkthrough(containerElement) {
 
   function onKeyDown(event) {
     if (event.target instanceof HTMLElement && event.target.closest('button, select, input, textarea')) return;
-    const handled = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight'];
+    if (event.code === 'KeyF') {
+      event.preventDefault();
+      if (!event.repeat) setFlyMode(!flyMode);
+      showHintOnce();
+      return;
+    }
+    const handled = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'Space', 'ControlLeft', 'ControlRight'];
     if (!handled.includes(event.code)) return;
     event.preventDefault();
     keys.add(event.code);
@@ -396,13 +629,31 @@ export function mountCafeWalkthrough(containerElement) {
   }
   function onReset() {
     stopTour();
+    setFlyMode(false);
     if (initialPosition) placePlayer(initialPosition, initialLookTarget);
     velocity.set(0, 0, 0);
   }
 
+  function onWindowBlur() {
+    keys.clear();
+    joystickValue = { x: 0, y: 0 };
+    velocity.set(0, 0, 0);
+    stick.style.transform = 'translate(-50%,-50%)';
+  }
+
+  function holdFlightKey(event, code) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (!flyMode) setFlyMode(true);
+    keys.add(code);
+  }
+
+  function releaseFlightKey(code) { keys.delete(code); }
+
   let initialLookTarget = new THREE.Vector3();
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', onWindowBlur);
   root.addEventListener('pointerdown', onPointerDown);
   root.addEventListener('pointermove', onPointerMove);
   root.addEventListener('pointerup', onPointerUp);
@@ -413,7 +664,16 @@ export function mountCafeWalkthrough(containerElement) {
   joystick.addEventListener('pointercancel', onJoystickUp);
   window.addEventListener('resize', resize);
   resetButton.addEventListener('click', onReset);
+  flyButton.addEventListener('click', () => setFlyMode(!flyMode));
+  insideButton.addEventListener('click', () => travelToEntrance(entranceInside));
+  outsideButton.addEventListener('click', () => travelToEntrance(entranceOutside));
   stopButton.addEventListener('click', stopTour);
+  riseButton.addEventListener('pointerdown', (event) => holdFlightKey(event, 'Space'));
+  riseButton.addEventListener('pointerup', () => releaseFlightKey('Space'));
+  riseButton.addEventListener('pointercancel', () => releaseFlightKey('Space'));
+  lowerButton.addEventListener('pointerdown', (event) => holdFlightKey(event, 'ControlLeft'));
+  lowerButton.addEventListener('pointerup', () => releaseFlightKey('ControlLeft'));
+  lowerButton.addEventListener('pointercancel', () => releaseFlightKey('ControlLeft'));
   spots.addEventListener('change', () => {
     const point = tourPoints[Number(spots.value)];
     if (!point) return;
@@ -434,34 +694,51 @@ export function mountCafeWalkthrough(containerElement) {
     if (disposed) return;
     const model = gltf.scene;
     scene.add(model);
-    model.traverse((object) => {
-      if (object.isLight) object.intensity *= 0.003;
-      if (!object.isMesh) return;
-      object.frustumCulled = true;
-      object.castShadow = false;
-      object.receiveShadow = true;
-      if (!object.geometry.boundsTree) object.geometry.computeBoundsTree({ targetLeafSize: 12 });
-      meshes.push(object);
-    });
+    model.updateMatrixWorld(true);
     bounds.setFromObject(model);
     const size = bounds.getSize(new THREE.Vector3());
-    walkBounds.makeEmpty();
+    const center = bounds.getCenter(new THREE.Vector3());
+    const safetyHalfSize = size.clone().multiplyScalar(1.5);
+    safetyBounds.set(center.clone().sub(safetyHalfSize), center.clone().add(safetyHalfSize));
+    const door = model.getObjectByName('Front_DoorHead');
+    const doorBounds = door ? new THREE.Box3().setFromObject(door) : null;
+    const terrain = model.getObjectByName('Ground_Grass');
+    const terrainBounds = terrain ? new THREE.Box3().setFromObject(terrain) : bounds;
+    const groundY = terrain ? terrainBounds.min.y - 0.015 : bounds.min.y - 0.05;
     model.traverse((object) => {
-      if (object.isMesh && WALKABLE_BOUNDS_NAME.test(object.name)) walkBounds.expandByObject(object);
+      if (object.isLight) object.intensity *= 0.003;
     });
-    if (walkBounds.isEmpty()) walkBounds.copy(bounds);
-    const walkSize = walkBounds.getSize(new THREE.Vector3());
-    loadingNote.textContent = `Walkable area ${walkSize.x.toFixed(1)} × ${walkSize.z.toFixed(1)} m · full export ${size.x.toFixed(0)} × ${size.y.toFixed(0)} × ${size.z.toFixed(0)} m`;
-    camera.far = Math.max(160, size.length() * 2);
+    mergeStaticMeshes(model);
+    addExtendedGround(groundY);
+    const safetySize = safetyBounds.getSize(new THREE.Vector3());
+    loadingNote.textContent = `Free roam ${safetySize.x.toFixed(0)} × ${safetySize.z.toFixed(0)} m · café scene ${size.x.toFixed(0)} × ${size.y.toFixed(1)} × ${size.z.toFixed(0)} m`;
+    camera.far = Math.max(1000, size.length() * 3);
     camera.updateProjectionMatrix();
-    const path = await tourPromise;
-    path.forEach((point, index) => {
+    const route = await tourPromise;
+    route.stops.forEach((point, index) => {
       tourPoints.push(point);
       const option = document.createElement('option');
       option.value = String(index);
       option.textContent = point.label;
       spots.append(option);
     });
+    const doorX = doorBounds?.getCenter(new THREE.Vector3()).x ?? 0;
+    const thresholdZ = doorBounds?.max.z ?? 0;
+    const fallbackOutside = {
+      position: [doorX, 1.8, thresholdZ + 14],
+      target: [doorX, 2.6, thresholdZ],
+    };
+    entranceOutside = route.entranceOutside ?? {
+      position: [doorX, 1.55, thresholdZ + 1.5],
+      target: [doorX, 1.6, thresholdZ - 3],
+    };
+    entranceInside = route.entranceInside ?? {
+      position: [doorX, 1.5, thresholdZ - 0.8],
+      target: [doorX, 1.4, thresholdZ - 4.2],
+    };
+    const startKey = route.outsideStart ?? fallbackOutside;
+    insideButton.disabled = false;
+    outsideButton.disabled = false;
     spots.disabled = tourPoints.length === 0;
     tourButton.disabled = tourPoints.length === 0 || REDUCED_MOTION.matches;
     if (REDUCED_MOTION.matches) tourButton.title = 'Automatic tours are off because reduced motion is enabled.';
@@ -470,11 +747,7 @@ export function mountCafeWalkthrough(containerElement) {
       tourButton.hidden = true;
       spots.hidden = true;
     }
-    const startKey = path.find((entry) => entry.pathIndex === 3 && walkBounds.containsPoint(new THREE.Vector3(...entry.position)))
-      ?? path.find((entry) => entry.label === 'Entrance' && walkBounds.containsPoint(new THREE.Vector3(...entry.position)));
-    const start = startKey
-      ? new THREE.Vector3(...startKey.position)
-      : new THREE.Vector3(bounds.min.x + size.x / 2, bounds.min.y + EYE_HEIGHT, bounds.max.z - Math.min(1.5, size.z * 0.08));
+    const start = new THREE.Vector3(...startKey.position);
     initialPosition = start.clone();
     initialLookTarget = startKey ? new THREE.Vector3(...startKey.target) : new THREE.Vector3(start.x, start.y, bounds.min.z);
     placePlayer(start, initialLookTarget);
@@ -504,6 +777,9 @@ export function mountCafeWalkthrough(containerElement) {
     window.removeEventListener('resize', resize);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', onWindowBlur);
+    resetButton.removeEventListener('click', onReset);
+    renderer.setAnimationLoop(null);
     root.removeEventListener('pointerdown', onPointerDown);
     root.removeEventListener('pointermove', onPointerMove);
     root.removeEventListener('pointerup', onPointerUp);
@@ -516,6 +792,8 @@ export function mountCafeWalkthrough(containerElement) {
       if (object.geometry.boundsTree) object.geometry.disposeBoundsTree();
       object.geometry.dispose();
     }
+    environmentTexture.dispose();
+    sky.material.dispose();
     renderer.dispose();
     root.remove();
     inlineStyle.remove();
