@@ -1,0 +1,10 @@
+
+{
+  "_note": "SAMPLE DATA - replace with the cafe's real menu",
+  "categories": ["Desserts", "Drinks"],
+  "items": [
+    { "id": "item-001", "category": "Desserts", "name": "Pistachio Lotus", "description": "Creamy pistachio with a crunchy Lotus biscuit base.", "price": 350, "image": "/images/food1.jpg" },
+    { "id": "item-002", "category": "Desserts", "name": "Chocolate Lava Cake", "description": "Warm molten chocolate centre.", "price": 220, "image": "/images/food2.jpg" },
+    { "id": "item-003", "category": "Drinks", "name": "Iced Caramel Latte", "description": "Espresso, milk and caramel over ice.", "price": 180, "image": "/images/drink1.jpg" }
+  ]
+}
