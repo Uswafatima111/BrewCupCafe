@@ -115,13 +115,13 @@ export function mountCafeWalkthrough(containerElement) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 0.65;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   canvasHost.append(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0xffead5, 0x38291e, 1.3));
-  const fill = new THREE.DirectionalLight(0xffd5a4, 1.15);
+  scene.add(new THREE.HemisphereLight(0xffead5, 0x38291e, 0.45));
+  const fill = new THREE.DirectionalLight(0xffd5a4, 0.25);
   fill.position.set(-4, 8, 6);
   scene.add(fill);
 
@@ -138,7 +138,6 @@ export function mountCafeWalkthrough(containerElement) {
   const keys = new Set();
   const lookTarget = new THREE.Vector3();
   const rayDirection = new THREE.Vector3();
-  const clock = new THREE.Clock();
   const tourPoints = [];
   let loaded = false;
   let disposed = false;
@@ -154,6 +153,7 @@ export function mountCafeWalkthrough(containerElement) {
   let floorY = 0;
   let initialPosition = null;
   let frameId = 0;
+  let previousFrame = performance.now();
 
   function floorAt(x, z, fromY = bounds.max.y + 1) {
     raycaster.set(new THREE.Vector3(x, fromY, z), down);
@@ -207,7 +207,6 @@ export function mountCafeWalkthrough(containerElement) {
 
   function showHintOnce() {
     hint.classList.add('is-hidden');
-    window.removeEventListener('keydown', showHintOnce);
   }
 
   function stopTour() {
@@ -327,7 +326,9 @@ export function mountCafeWalkthrough(containerElement) {
   function render() {
     if (disposed) return;
     frameId = window.requestAnimationFrame(render);
-    const delta = Math.min(clock.getDelta(), 0.05);
+    const now = performance.now();
+    const delta = Math.min((now - previousFrame) / 1000, 0.05);
+    previousFrame = now;
     if (loaded) {
       stepTour(delta);
       movePlayer(delta);
@@ -410,7 +411,6 @@ export function mountCafeWalkthrough(containerElement) {
   joystick.addEventListener('pointermove', onJoystickMove);
   joystick.addEventListener('pointerup', onJoystickUp);
   joystick.addEventListener('pointercancel', onJoystickUp);
-  window.addEventListener('keyup', onKeyUp);
   window.addEventListener('resize', resize);
   resetButton.addEventListener('click', onReset);
   stopButton.addEventListener('click', stopTour);
@@ -435,11 +435,12 @@ export function mountCafeWalkthrough(containerElement) {
     const model = gltf.scene;
     scene.add(model);
     model.traverse((object) => {
+      if (object.isLight) object.intensity *= 0.003;
       if (!object.isMesh) return;
       object.frustumCulled = true;
       object.castShadow = false;
       object.receiveShadow = true;
-      if (!object.geometry.boundsTree) object.geometry.computeBoundsTree({ maxLeafSize: 12 });
+      if (!object.geometry.boundsTree) object.geometry.computeBoundsTree({ targetLeafSize: 12 });
       meshes.push(object);
     });
     bounds.setFromObject(model);
@@ -501,7 +502,6 @@ export function mountCafeWalkthrough(containerElement) {
     disposed = true;
     window.cancelAnimationFrame(frameId);
     window.removeEventListener('resize', resize);
-    window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     root.removeEventListener('pointerdown', onPointerDown);
