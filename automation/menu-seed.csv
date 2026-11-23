@@ -1,0 +1,9 @@
+itemId,name,price,category,description,imageUrl,photoUrls,modelUrl,modelStatus,active
+item-001,Nutella Bomboloni,130,Desserts,Soft Italian-style filled doughnut with Nutella,,[],,none,true
+item-002,London Viral Cake,350,Desserts,Cafe signature cake,,[],,none,true
+item-003,Almond Praline & Strawberry Dark Chocolate Cake,400,Desserts,Dark chocolate cake with almond praline and strawberry,,[],,none,true
+item-004,Spanish Latte,199,Drinks,"Sweet, creamy Spanish-style latte",,[],,none,true
+item-005,Iced French Vanilla Latte,179,Drinks,Iced latte with French vanilla,,[],,none,true
+item-006,Iced Cafe Mocha,179,Drinks,Iced coffee with chocolate,,[],,none,true
+item-007,Chicken Overload Pizza,400,Savoury,Pizza loaded with chicken,,[],,none,true
+item-008,Alfredo Pasta,300,Savoury,Pasta in creamy Alfredo sauce,,[],,none,true

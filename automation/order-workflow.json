@@ -1,0 +1,245 @@
+{
+  "name": "Brew Cup Cafe - Order Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "brew-cup-order",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "b477b173-b7eb-437e-94ee-2bb39de18017",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "4606f47e-941c-467d-adda-3c5f5d7c376e"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "returnAll": true
+      },
+      "id": "91babb8d-3729-4010-8b0a-083e3369d44d",
+      "name": "Get Menu Items",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        220,
+        200
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// n8n Cloud has no env variables: set the staff email here\nconst STAFF_EMAIL = 'staff@example.com';\n\n// Trusted menu = rows of the menu_items Data Table (never the browser's prices)\nconst rows = $('Get Menu Items').all().map(i => i.json);\nconst MENU = {};\nfor (const r of rows) {\n  if (!r || typeof r.itemId !== 'string' || r.itemId === '') continue;\n  if (r.active === false || r.active === 'false') continue;\n  const price = Number(r.price);\n  if (!Number.isFinite(price) || price < 0) continue;\n  MENU[r.itemId] = { name: String(r.name), price };\n}\n\nconst body = $('Order Webhook').first().json.body || {};\nconst customer = body.customer || {};\nconst items = Array.isArray(body.items) ? body.items : [];\nconst errors = [];\n\nif (Object.keys(MENU).length === 0) errors.push('Menu is currently unavailable. Please try again later.');\n\nconst name = String(customer.name || '').trim();\nconst email = String(customer.email || '').trim();\nconst phone = String(customer.phone || '').replace(/[\\s-]/g, '');\n\nif (name.length < 2 || name.length > 80) errors.push('Customer name is required (2-80 characters).');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) errors.push('A valid email address is required.');\nif (!/^\\+?\\d{10,13}$/.test(phone)) errors.push('A valid phone number is required (10-13 digits).');\nif (items.length === 0) errors.push('Cart is empty.');\nif (items.length > 30) errors.push('Too many items in cart.');\n\nconst lines = [];\nfor (const it of items.slice(0, 30)) {\n  const id = it && it.id;\n  const qty = Number(it && it.quantity);\n  if (typeof id !== 'string' || !Object.prototype.hasOwnProperty.call(MENU, id)) {\n    errors.push('Unknown or unavailable product id: ' + String(id));\n    continue;\n  }\n  const m = MENU[id];\n  if (!Number.isInteger(qty) || qty < 1 || qty > 20) {\n    errors.push('Invalid quantity for ' + m.name + ' (1-20 allowed).');\n    continue;\n  }\n  lines.push({ id, name: m.name, quantity: qty, unitPrice: m.price, lineTotal: m.price * qty });\n}\n\nif (errors.length > 0) {\n  return [{ json: { valid: false, errors } }];\n}\n\nconst total = lines.reduce((s, l) => s + l.lineTotal, 0);\nconst year = new Date().getFullYear();\nconst orderId = 'BC-' + year + '-' + Date.now().toString(36).slice(-5).toUpperCase() +\n  Math.random().toString(36).slice(2, 4).toUpperCase();\n\nconst esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nconst rowsHtml = lines.map(l =>\n  '<tr><td style=\"padding:8px;border-bottom:1px solid #eee\">' + esc(l.name) + '</td>' +\n  '<td style=\"padding:8px;border-bottom:1px solid #eee;text-align:center\">' + l.quantity + '</td>' +\n  '<td style=\"padding:8px;border-bottom:1px solid #eee;text-align:right\">&#8377;' + l.lineTotal + '</td></tr>'\n).join('');\n\nconst emailHtml =\n  '<div style=\"font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#3b2a20\">' +\n  '<h2 style=\"color:#6f4e37\">Brew Cup Cafe</h2>' +\n  '<p>Hi ' + esc(name) + ', thank you for your order!</p>' +\n  '<p><b>Order ID:</b> ' + orderId + '</p>' +\n  '<table style=\"width:100%;border-collapse:collapse\"><tr style=\"background:#f5ebe0\"><th style=\"padding:8px;text-align:left\">Item</th><th style=\"padding:8px\">Qty</th><th style=\"padding:8px;text-align:right\">Amount</th></tr>' +\n  rowsHtml +\n  '<tr><td colspan=\"2\" style=\"padding:8px;text-align:right\"><b>Total</b></td><td style=\"padding:8px;text-align:right\"><b>&#8377;' + total + '</b></td></tr></table>' +\n  '<p style=\"font-size:12px;color:#888\">Sample order for the Brew Cup Cafe capstone demo.</p></div>';\n\nconst staffHtml =\n  '<div style=\"font-family:Arial,sans-serif\"><h3>New order ' + orderId + '</h3>' +\n  '<p>Customer: ' + esc(name) + '<br>Phone: ' + esc(phone) + '<br>Email: ' + esc(email) + '</p>' +\n  '<table style=\"border-collapse:collapse\">' + rowsHtml + '</table><p><b>Total: &#8377;' + total + '</b></p></div>';\n\nreturn [{ json: {\n  valid: true, orderId, total, lines, staffEmail: STAFF_EMAIL,\n  customer: { name, email, phone },\n  emailSubject: 'Brew Cup Cafe - Order ' + orderId + ' confirmed',\n  staffSubject: 'New order ' + orderId + ' (Rs.' + total + ')',\n  emailHtml, staffHtml\n} }];"
+      },
+      "id": "1369cd9b-660a-4894-b3ae-843b6579c79b",
+      "name": "Validate & Price Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6a686664-34b5-4b52-95b4-b9574b276afd",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fbacc067-b5df-4f8e-be3d-ca268e3a43a7",
+      "name": "Is Order Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.customer.email }}",
+        "subject": "={{ $json.emailSubject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "868a71fd-a915-4dfd-8815-b3b5ffe0954c",
+      "name": "Send Customer Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Validate & Price Order').first().json.staffEmail }}",
+        "subject": "={{ $('Validate & Price Order').first().json.staffSubject }}",
+        "emailType": "html",
+        "message": "={{ $('Validate & Price Order').first().json.staffHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "351ee99c-b8b2-48f0-b917-21fa28b41ce8",
+      "name": "Notify Staff",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {
+          "responseCode": 200
+        },
+        "responseBody": "={{ { success: true, orderId: $('Validate & Price Order').first().json.orderId, total: $('Validate & Price Order').first().json.total, message: 'Your order has been received! A confirmation email is on its way.' } }}"
+      },
+      "id": "2117fe26-ec04-4777-ac89-aa53d9ebba52",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {
+          "responseCode": 400
+        },
+        "responseBody": "={{ { success: false, message: 'Order could not be processed.', errors: $json.errors } }}"
+      },
+      "id": "28038c26-6f93-4b57-80f0-807f03ed61a1",
+      "name": "Respond Invalid Order",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Order Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Menu Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Menu Items": {
+      "main": [
+        [
+          {
+            "node": "Validate & Price Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Price Order": {
+      "main": [
+        [
+          {
+            "node": "Is Order Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Order Valid?": {
+      "main": [
+        [
+          {
+            "node": "Send Customer Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Customer Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Notify Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Staff": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

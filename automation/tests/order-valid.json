@@ -1,0 +1,17 @@
+{
+  "customer": {
+    "name": "Test Customer",
+    "email": "YOUR_TEST_EMAIL@gmail.com",
+    "phone": "9876543210"
+  },
+  "items": [
+    {
+      "id": "item-001",
+      "quantity": 2
+    },
+    {
+      "id": "item-004",
+      "quantity": 1
+    }
+  ]
+}

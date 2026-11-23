@@ -1,0 +1,113 @@
+{
+  "name": "Brew Cup Cafe - Get Menu",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "brew-cup-menu",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "b671a1e1-947c-44a3-98bc-86a57bab82a9",
+      "name": "Menu Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "057edeab-28f1-4f35-b4c7-d313ba61e6e1"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "returnAll": true
+      },
+      "id": "5b610946-f43e-4d1d-838f-f4c4577fef88",
+      "name": "Get Menu Items",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        220,
+        200
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $('Get Menu Items').all().map(i => i.json)\n  .filter(r => r && r.itemId && r.active !== false && r.active !== 'false')\n  .map(r => ({\n    id: r.itemId,\n    name: r.name,\n    price: Number(r.price),\n    category: r.category || '',\n    description: r.description || '',\n    imageUrl: r.imageUrl || '',\n    modelUrl: r.modelUrl || '',\n    modelStatus: r.modelStatus || 'none'\n  }));\nreturn [{ json: { success: true, items } }];"
+      },
+      "id": "ea749d6a-29f0-4e4f-9da6-dfb45ee9d14f",
+      "name": "Format Menu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "982d399a-ae4a-4d7b-a8b4-ae415dc629c7",
+      "name": "Respond Menu",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Menu Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Menu Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Menu Items": {
+      "main": [
+        [
+          {
+            "node": "Format Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Menu": {
+      "main": [
+        [
+          {
+            "node": "Respond Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

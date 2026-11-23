@@ -1,0 +1,13 @@
+{
+  "customer": {
+    "name": "",
+    "email": "not-an-email",
+    "phone": "123"
+  },
+  "items": [
+    {
+      "id": "item-999",
+      "quantity": 0
+    }
+  ]
+}

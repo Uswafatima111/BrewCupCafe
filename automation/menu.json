@@ -1,0 +1,62 @@
+{
+  "_note": "Reference copy of the initial SAMPLE menu. The live menu is the n8n Data Table menu_items (seed it with menu-seed.csv).",
+  "currency": "INR",
+  "items": [
+    {
+      "id": "item-001",
+      "name": "Nutella Bomboloni",
+      "price": 130,
+      "category": "Desserts",
+      "description": "Soft Italian-style filled doughnut with Nutella"
+    },
+    {
+      "id": "item-002",
+      "name": "London Viral Cake",
+      "price": 350,
+      "category": "Desserts",
+      "description": "Cafe signature cake"
+    },
+    {
+      "id": "item-003",
+      "name": "Almond Praline & Strawberry Dark Chocolate Cake",
+      "price": 400,
+      "category": "Desserts",
+      "description": "Dark chocolate cake with almond praline and strawberry"
+    },
+    {
+      "id": "item-004",
+      "name": "Spanish Latte",
+      "price": 199,
+      "category": "Drinks",
+      "description": "Sweet, creamy Spanish-style latte"
+    },
+    {
+      "id": "item-005",
+      "name": "Iced French Vanilla Latte",
+      "price": 179,
+      "category": "Drinks",
+      "description": "Iced latte with French vanilla"
+    },
+    {
+      "id": "item-006",
+      "name": "Iced Cafe Mocha",
+      "price": 179,
+      "category": "Drinks",
+      "description": "Iced coffee with chocolate"
+    },
+    {
+      "id": "item-007",
+      "name": "Chicken Overload Pizza",
+      "price": 400,
+      "category": "Savoury",
+      "description": "Pizza loaded with chicken"
+    },
+    {
+      "id": "item-008",
+      "name": "Alfredo Pasta",
+      "price": 300,
+      "category": "Savoury",
+      "description": "Pasta in creamy Alfredo sauce"
+    }
+  ]
+}

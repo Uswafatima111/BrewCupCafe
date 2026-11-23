@@ -1,0 +1,11 @@
+{
+  "adminPasscode": "YOUR_ADMIN_PASSCODE",
+  "name": "Test Brownie",
+  "price": 150,
+  "category": "Desserts",
+  "description": "Test item",
+  "photoUrls": [
+    "https://example.com/front.jpg",
+    "https://example.com/side.jpg"
+  ]
+}

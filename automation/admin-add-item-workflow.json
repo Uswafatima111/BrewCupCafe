@@ -1,0 +1,207 @@
+{
+  "name": "Brew Cup Cafe - Admin Add Menu Item",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "brew-cup-admin-add-item",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "53533b93-d763-4fc6-bc58-82b5bc038677",
+      "name": "Admin Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "be0b7b5a-fcb5-4183-a3f4-7dd4a21610ff"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Change this passcode in n8n only. Keep CHANGE_ME in the copy committed to Git.\nconst ADMIN_PASSCODE = 'CHANGE_ME';\n\nconst body = $('Admin Webhook').first().json.body || {};\n\nif (String(body.adminPasscode || '') !== ADMIN_PASSCODE) {\n  return [{ json: { statusCode: 401, errors: ['Invalid admin passcode.'] } }];\n}\n\nconst errors = [];\nconst name = String(body.name || '').trim();\nconst price = Number(body.price);\nconst category = String(body.category || '').trim();\nconst description = String(body.description || '').trim();\nconst photos = Array.isArray(body.photoUrls) ? body.photoUrls.map(String) : [];\n\nif (name.length < 2 || name.length > 80) errors.push('Item name is required (2-80 characters).');\nif (!Number.isFinite(price) || price <= 0 || price > 100000) errors.push('Price must be a positive number.');\nif (category.length < 1 || category.length > 40) errors.push('Category is required.');\nif (description.length > 300) errors.push('Description is too long (max 300 characters).');\nif (photos.length < 1 || photos.length > 8) errors.push('Provide 1-8 photo URLs.');\nif (!photos.every(u => /^https:\\/\\//.test(u))) errors.push('Every photo must be an https URL.');\n\nif (errors.length > 0) {\n  return [{ json: { statusCode: 400, errors } }];\n}\n\nconst itemId = 'item-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);\n\n// Field names below = columns of the menu_items Data Table\nreturn [{ json: {\n  itemId,\n  name,\n  price,\n  category,\n  description,\n  imageUrl: photos[0],\n  photoUrls: JSON.stringify(photos),\n  modelUrl: '',\n  modelStatus: 'none',\n  active: true\n} }];"
+      },
+      "id": "38e1f363-6742-4d81-a302-725b1b47b378",
+      "name": "Validate Admin Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7d6e60e5-eb12-4cb2-bae1-8b488a7c2a1b",
+              "leftValue": "={{ $json.itemId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7b1f53e2-0076-459f-8318-e0fac855ada6",
+      "name": "Is Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        }
+      },
+      "id": "b1a2b0ee-fbe4-475a-b561-222f89ae592b",
+      "name": "Insert Menu Item",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        680,
+        80
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "46d1c769-6956-4801-b74a-118600fe0910",
+      "name": "3D Generation (add later)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        900,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {
+          "responseCode": 200
+        },
+        "responseBody": "={{ { success: true, message: 'Menu item added.', item: { id: $('Validate Admin Input').first().json.itemId, name: $('Validate Admin Input').first().json.name, price: $('Validate Admin Input').first().json.price, modelStatus: 'none' } } }}"
+      },
+      "id": "8e624225-2f43-414d-8740-10b0a54e4ce2",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 400 }}"
+        },
+        "responseBody": "={{ { success: false, message: $json.errors[0], errors: $json.errors } }}"
+      },
+      "id": "953c4a8a-c124-419e-a59a-f1692fcd411a",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        680,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Admin Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Admin Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Admin Input": {
+      "main": [
+        [
+          {
+            "node": "Is Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "Insert Menu Item",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Menu Item": {
+      "main": [
+        [
+          {
+            "node": "3D Generation (add later)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3D Generation (add later)": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
